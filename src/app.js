@@ -2,11 +2,10 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-const sequelize = require('./config/db');
+const sequelize = require('./config/database');
 
 const authRoutes = require('./routes/auth.routes');
-const productoRoutes = require('./routes/producto.routes');
-const ventaRoutes = require('./routes/venta.routes');
+const mercanciaRoutes = require('./routes/mercancia.routes');
 
 const app = express();
 
@@ -14,8 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
-app.use('/api/productos', productoRoutes);
-app.use('/api/ventas', ventaRoutes);
+app.use('/api/mercancias', mercanciaRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'API funcionando correctamente' });

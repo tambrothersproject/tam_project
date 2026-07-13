@@ -4,12 +4,20 @@ const { Model } = require('sequelize');
 module.exports = (sequelize, DataTypes) => {
   class Pallet extends Model {
     static associate(models) {
-      Pallet.hasMany(models.Inventario, { foreignKey: 'idPallet', as: 'inventarios' });
+      Pallet.hasMany(models.Mercancia, { foreignKey: 'idPallet', as: 'mercancias' });
     }
   }
 
   Pallet.init(
     {
+      numero: {
+        // Número de pallet tal como aparece en tu Excel ("No. Pallet").
+        // Es distinto del id autoincremental; se usa para que el import
+        // sea idempotente y no cree pallets duplicados en cada corrida.
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        unique: true,
+      },
       ubicacion: {
         type: DataTypes.STRING,
         allowNull: false,

@@ -1,14 +1,13 @@
 const { body } = require('express-validator');
 
-exports.registerValidator = [
-  body('name').notEmpty().withMessage('El nombre es obligatorio'),
-  body('email').isEmail().withMessage('Email inválido'),
-  body('password')
-    .isLength({ min: 6 })
-    .withMessage('La contraseña debe tener al menos 6 caracteres'),
+exports.loginValidator = [
+  body('username').notEmpty().withMessage('El usuario es obligatorio'),
+  body('password').notEmpty().withMessage('La contraseña es obligatoria'),
 ];
 
-exports.loginValidator = [
-  body('email').isEmail().withMessage('Email inválido'),
-  body('password').notEmpty().withMessage('La contraseña es obligatoria'),
+exports.cambiarMiPasswordValidator = [
+  body('passwordActual').notEmpty().withMessage('Debes ingresar tu contraseña actual'),
+  body('passwordNueva')
+    .isLength({ min: 4 })
+    .withMessage('La nueva contraseña debe tener al menos 4 caracteres'),
 ];

@@ -1,4 +1,4 @@
-const { Mercancia, Pallet } = require('../models');
+const { Mercancia, Pallet, sequelize } = require('../models');
 
 // GET /api/mercancias?estado=DISPONIBLE&idPallet=1
 // Reemplaza tus hojas de Excel "Ventas" (estado=VENDIDO) e "Inventario" (estado=DISPONIBLE).
@@ -48,25 +48,38 @@ exports.obtenerPorId = async (req, res) => {
 
 // POST /api/mercancias
 // Crea un artículo nuevo, disponible por defecto (aún no vendido).
+// Recibe "numeroPallet" (el número físico del pallet, ej. 0, 1, 2...), no un id.
+// Si ese número de pallet no existe todavía, se crea automáticamente.
 exports.crear = async (req, res) => {
+  const t = await sequelize.transaction();
   try {
-    const { producto, precioMercado, precioSugerido, idPallet, estado } = req.body;
+    const { producto, precioMercado, precioSugerido, numeroPallet } = req.body;
 
-    const pallet = await Pallet.findByPk(idPallet);
-    if (!pallet) {
-      return res.status(404).json({ error: 'El pallet indicado no existe' });
-    }
-
-    const mercancia = await Mercancia.create({
-      producto,
-      precioMercado,
-      precioSugerido,
-      idPallet,
-      estado: estado || 'DISPONIBLE',
+    const [pallet] = await Pallet.findOrCreate({
+      where: { numero: numeroPallet },
+      defaults: {
+        numero: numeroPallet,
+        ubicacion: `Pallet ${numeroPallet}`,
+        fechaEntrada: new Date(),
+      },
+      transaction: t,
     });
 
-    res.status(201).json(mercancia);
+    const mercancia = await Mercancia.create(
+      {
+        producto,
+        precioMercado: precioMercado || null,
+        precioSugerido: precioSugerido || null,
+        idPallet: pallet.id,
+        estado: 'DISPONIBLE',
+      },
+      { transaction: t }
+    );
+
+    await t.commit();
+    res.status(201).json({ ...mercancia.toJSON(), pallet });
   } catch (error) {
+    await t.rollback();
     res.status(500).json({ error: 'Error al crear el artículo', detalle: error.message });
   }
 };
@@ -78,12 +91,21 @@ exports.actualizar = async (req, res) => {
     const mercancia = await Mercancia.findByPk(req.params.id);
     if (!mercancia) return res.status(404).json({ error: 'Artículo no encontrado' });
 
-    if (req.body.idPallet) {
-      const pallet = await Pallet.findByPk(req.body.idPallet);
-      if (!pallet) return res.status(404).json({ error: 'El pallet indicado no existe' });
+    const { producto, precioMercado, precioSugerido, numeroPallet } = req.body;
+
+    let idPallet = mercancia.idPallet;
+    if (numeroPallet !== undefined) {
+      const [pallet] = await Pallet.findOrCreate({
+        where: { numero: numeroPallet },
+        defaults: {
+          numero: numeroPallet,
+          ubicacion: `Pallet ${numeroPallet}`,
+          fechaEntrada: new Date(),
+        },
+      });
+      idPallet = pallet.id;
     }
 
-    const { producto, precioMercado, precioSugerido, idPallet } = req.body;
     await mercancia.update({ producto, precioMercado, precioSugerido, idPallet });
 
     res.json(mercancia);

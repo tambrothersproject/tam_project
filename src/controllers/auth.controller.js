@@ -2,29 +2,12 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 
-exports.register = async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-
-    const existente = await User.findOne({ where: { email } });
-    if (existente) {
-      return res.status(409).json({ error: 'El email ya está registrado' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, email, password: hashedPassword });
-
-    res.status(201).json(user);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al registrar el usuario', detalle: error.message });
-  }
-};
-
+// POST /api/auth/login
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { username, password } = req.body;
 
-    const user = await User.findOne({ where: { email } });
+    const user = await User.findOne({ where: { username } });
     if (!user) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
@@ -35,7 +18,7 @@ exports.login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, username: user.username },
       process.env.JWT_SECRET,
       { expiresIn: '1d' }
     );
@@ -43,9 +26,33 @@ exports.login = async (req, res) => {
     res.json({
       mensaje: 'Login exitoso',
       token,
-      usuario: { id: user.id, name: user.name, email: user.email },
+      usuario: { id: user.id, name: user.name, username: user.username, isAdmin: user.isAdmin },
     });
   } catch (error) {
     res.status(500).json({ error: 'Error al iniciar sesión', detalle: error.message });
+  }
+};
+
+// PUT /api/auth/mi-password
+// Cualquier usuario autenticado puede cambiar SU PROPIA contraseña,
+// verificando primero la contraseña actual.
+exports.cambiarMiPassword = async (req, res) => {
+  try {
+    const { passwordActual, passwordNueva } = req.body;
+
+    const user = await User.findByPk(req.userId);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const passwordValida = await bcrypt.compare(passwordActual, user.password);
+    if (!passwordValida) {
+      return res.status(401).json({ error: 'La contraseña actual no es correcta' });
+    }
+
+    const hashed = await bcrypt.hash(passwordNueva, 10);
+    await user.update({ password: hashed });
+
+    res.json({ mensaje: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al cambiar la contraseña', detalle: error.message });
   }
 };

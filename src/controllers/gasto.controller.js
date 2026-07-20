@@ -1,10 +1,25 @@
-const { Op } = require('sequelize');
+const { Op, fn, literal } = require('sequelize');
 const { Gasto, Pallet } = require('../models');
 
-// GET /api/gastos?categoria=&desde=&hasta=
+// GET /api/gastos?categoria=&desde=&hasta=&tipo=&q=&page=&limit=
+// Antes esta consulta traía TODO el historial de gastos y el filtro de
+// "tipo" (operativo/no operativo) se aplicaba en el navegador con
+// .filter(). Conforme el historial crece mes a mes, eso deja de escalar
+// igual que pasaba en Mercancía. Ahora:
+//   - "tipo" se resuelve en SQL (afectaUtilidad).
+//   - "q" busca en descripcion y socio directamente en la base de datos.
+//   - "page"/"limit" paginan el listado que se manda al navegador.
+//   - Los totales operativo/no operativo se calculan con una consulta de
+//     agregación SEPARADA sobre TODO el rango filtrado (sin paginar),
+//     para que sigan siendo el total real del período y no solo el de la
+//     página visible.
 exports.listar = async (req, res) => {
   try {
-    const { categoria, desde, hasta } = req.query;
+    const { categoria, desde, hasta, tipo, q } = req.query;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 30;
+    const offset = (page - 1) * limit;
+
     const where = {};
     if (categoria) where.categoria = categoria;
     if (desde || hasta) {
@@ -12,20 +27,44 @@ exports.listar = async (req, res) => {
       if (desde) where.fecha[Op.gte] = desde;
       if (hasta) where.fecha[Op.lte] = hasta;
     }
+    if (tipo) where.afectaUtilidad = tipo === 'OPERATIVO';
+    if (q) {
+      where[Op.or] = [
+        { descripcion: { [Op.iLike]: `%${q}%` } },
+        { socio: { [Op.iLike]: `%${q}%` } },
+      ];
+    }
 
-    const gastos = await Gasto.findAll({
-      where,
-      include: [{ model: Pallet, as: 'pallet', attributes: ['numero'] }],
-      order: [['fecha', 'DESC']],
+    const [{ rows, count }, totales] = await Promise.all([
+      Gasto.findAndCountAll({
+        where,
+        include: [{ model: Pallet, as: 'pallet', attributes: ['numero'] }],
+        order: [['fecha', 'DESC']],
+        limit,
+        offset,
+      }),
+      Gasto.findAll({
+        where,
+        attributes: [
+          [fn('SUM', literal(`CASE WHEN "afectaUtilidad" THEN "monto" ELSE 0 END`)), 'totalOperativo'],
+          [fn('SUM', literal(`CASE WHEN "afectaUtilidad" THEN 0 ELSE "monto" END`)), 'totalNoOperativo'],
+        ],
+        raw: true,
+      }),
+    ]);
+
+    const totalOperativo = parseFloat(totales[0]?.totalOperativo || 0);
+    const totalNoOperativo = parseFloat(totales[0]?.totalNoOperativo || 0);
+
+    res.json({
+      gastos: rows,
+      total: totalOperativo + totalNoOperativo,
+      totalOperativo,
+      totalNoOperativo,
+      totalRegistros: count,
+      page,
+      totalPages: Math.max(1, Math.ceil(count / limit)),
     });
-    const totalOperativo = gastos
-      .filter((g) => g.afectaUtilidad)
-      .reduce((acc, g) => acc + parseFloat(g.monto), 0);
-    const totalNoOperativo = gastos
-      .filter((g) => !g.afectaUtilidad)
-      .reduce((acc, g) => acc + parseFloat(g.monto), 0);
-
-    res.json({ total: totalOperativo + totalNoOperativo, totalOperativo, totalNoOperativo, gastos });
   } catch (error) {
     res.status(500).json({ error: 'Error al listar gastos', detalle: error.message });
   }

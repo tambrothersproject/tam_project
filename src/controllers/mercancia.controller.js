@@ -1,21 +1,44 @@
+const { Op } = require('sequelize');
 const { Mercancia, Pallet, sequelize } = require('../models');
 
-// GET /api/mercancias?estado=DISPONIBLE&idPallet=1
+// GET /api/mercancias?estado=DISPONIBLE&idPallet=1&q=texto&page=1&limit=30
 // Reemplaza tus hojas de Excel "Ventas" (estado=VENDIDO) e "Inventario" (estado=DISPONIBLE).
+//
+// Pagina y busca en el servidor: con miles de artículos, ya no es viable
+// mandar toda la tabla al navegador y filtrar ahí con .filter() (como se
+// hacía antes). "q" filtra por nombre de producto directamente en SQL con
+// ILIKE, y "page"/"limit" limitan cuántas filas viajan por request.
+//
+// Si no se manda "page"/"limit", se asume page=1 y limit=30 — así el
+// frontend actual (o cualquier consumidor viejo de esta API) sigue
+// funcionando sin cambios obligatorios, solo que ahora recibe una página
+// en vez de la tabla completa.
 exports.listar = async (req, res) => {
   try {
-    const { estado, idPallet } = req.query;
+    const { estado, idPallet, q } = req.query;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 30;
+    const offset = (page - 1) * limit;
+
     const where = {};
     if (estado) where.estado = estado;
     if (idPallet) where.idPallet = idPallet;
+    if (q) where.producto = { [Op.iLike]: `%${q}%` };
 
-    const mercancias = await Mercancia.findAll({
+    const { rows, count } = await Mercancia.findAndCountAll({
       where,
       include: [{ model: Pallet, as: 'pallet' }],
       order: [['id', 'ASC']],
+      limit,
+      offset,
     });
 
-    res.json(mercancias);
+    res.json({
+      items: rows,
+      total: count,
+      page,
+      totalPages: Math.max(1, Math.ceil(count / limit)),
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error al listar mercancía', detalle: error.message });
   }

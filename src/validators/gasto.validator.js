@@ -23,10 +23,20 @@ exports.actualizarGastoValidator = [
   body('idPallet').optional({ nullable: true }).isInt().withMessage('idPallet debe ser un entero válido'),
 ];
 
+// GET /api/gastos?categoria=&desde=&hasta=&tipo=&q=&page=&limit=
+// "tipo" reemplaza el filtro que antes se hacía en el navegador con
+// .filter() sobre afectaUtilidad — ahora se resuelve en SQL.
+// "q" busca en descripcion y socio (ILIKE), también en el servidor.
+// "page"/"limit" paginan el listado; el total operativo/no operativo se
+// sigue calculando sobre TODO el rango filtrado, no solo la página visible.
 exports.listarGastoValidator = [
   query('categoria').optional().isIn(CATEGORIAS),
   query('desde').optional().isISO8601(),
   query('hasta').optional().isISO8601(),
+  query('tipo').optional().isIn(['OPERATIVO', 'NO_OPERATIVO']).withMessage('tipo debe ser OPERATIVO o NO_OPERATIVO'),
+  query('q').optional().isString().trim(),
+  query('page').optional().isInt({ min: 1 }).withMessage('page debe ser un entero mayor a 0'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('limit debe ser un entero entre 1 y 100'),
 ];
 
 exports.CATEGORIAS = CATEGORIAS;

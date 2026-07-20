@@ -25,7 +25,16 @@ exports.venderMercanciaValidator = [
   body('fechaVenta').optional().isISO8601().withMessage('fechaVenta debe tener formato de fecha válido'),
 ];
 
+// GET /api/mercancias?estado=&idPallet=&q=&page=&limit=
+// "q" busca por nombre de producto (ILIKE, sin distinguir mayúsculas/acentos
+// exactos) directamente en la base de datos, en vez de traer toda la tabla
+// y filtrar en el navegador. "page"/"limit" paginan el resultado; el límite
+// tiene un tope de 100 para no permitir accidentalmente traer la tabla
+// completa de un solo golpe conforme crezca.
 exports.listarMercanciaValidator = [
   query('estado').optional().isIn(['DISPONIBLE', 'VENDIDO']).withMessage('estado debe ser DISPONIBLE o VENDIDO'),
   query('idPallet').optional().isInt().withMessage('idPallet debe ser un entero válido'),
+  query('q').optional().isString().trim(),
+  query('page').optional().isInt({ min: 1 }).withMessage('page debe ser un entero mayor a 0'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('limit debe ser un entero entre 1 y 100'),
 ];

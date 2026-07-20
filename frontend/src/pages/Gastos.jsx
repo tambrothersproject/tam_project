@@ -9,6 +9,8 @@ const CATEGORIAS = [
   { value: 'OTRO', label: 'Otro' },
 ];
 
+const OPCIONES_POR_PAGINA = [10, 30, 50, 100];
+
 function etiqueta(categoria) {
   return CATEGORIAS.find((c) => c.value === categoria)?.label || categoria;
 }
@@ -20,22 +22,46 @@ function fmt(n) {
 export default function Gastos() {
   const [gastos, setGastos] = useState([]);
   const [totales, setTotales] = useState({ total: 0, totalOperativo: 0, totalNoOperativo: 0 });
+  const [totalRegistros, setTotalRegistros] = useState(0);
+  const [totalPaginas, setTotalPaginas] = useState(1);
+  const [pagina, setPagina] = useState(1);
+  const [itemsPorPagina, setItemsPorPagina] = useState(30);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [modalAbierto, setModalAbierto] = useState(false);
   const [gastoEditando, setGastoEditando] = useState(null);
   const [categoriaFiltro, setCategoriaFiltro] = useState('');
   const [tipoFiltro, setTipoFiltro] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  const [busquedaDebounced, setBusquedaDebounced] = useState('');
+
+  // Espera 350ms sin que el usuario escriba antes de buscar — si no, cada
+  // tecla dispararía un request contra todo el historial de gastos.
+  useEffect(() => {
+    const t = setTimeout(() => setBusquedaDebounced(busqueda), 350);
+    return () => clearTimeout(t);
+  }, [busqueda]);
+
+  // Cualquier cambio de filtro, búsqueda o tamaño de página regresa a la
+  // página 1 — si no, podrías quedarte "varado" en una página que ya no
+  // existe para el nuevo filtro.
+  useEffect(() => {
+    setPagina(1);
+  }, [categoriaFiltro, tipoFiltro, busquedaDebounced, itemsPorPagina]);
 
   async function cargar() {
     setCargando(true);
     setError('');
     try {
-      const params = {};
+      const params = { page: pagina, limit: itemsPorPagina };
       if (categoriaFiltro) params.categoria = categoriaFiltro;
+      if (tipoFiltro) params.tipo = tipoFiltro;
+      if (busquedaDebounced) params.q = busquedaDebounced;
       const { data } = await api.get('/gastos', { params });
       setGastos(data.gastos);
       setTotales({ total: data.total, totalOperativo: data.totalOperativo, totalNoOperativo: data.totalNoOperativo });
+      setTotalRegistros(data.totalRegistros);
+      setTotalPaginas(data.totalPages);
     } catch (err) {
       setError(err.response?.data?.error || 'No se pudieron cargar los gastos');
     } finally {
@@ -46,7 +72,7 @@ export default function Gastos() {
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoriaFiltro]);
+  }, [categoriaFiltro, tipoFiltro, busquedaDebounced, itemsPorPagina, pagina]);
 
   async function eliminar(gasto) {
     if (!confirm(`¿Eliminar el gasto "${etiqueta(gasto.categoria)}" de ${fmt(gasto.monto)}?`)) return;
@@ -54,17 +80,18 @@ export default function Gastos() {
     cargar();
   }
 
-  const visibles = gastos.filter((g) => {
-    if (tipoFiltro === 'OPERATIVO') return g.afectaUtilidad;
-    if (tipoFiltro === 'NO_OPERATIVO') return !g.afectaUtilidad;
-    return true;
-  });
-
   return (
     <div>
       <h1 className="page-title">Gastos</h1>
 
       <div className="topbar">
+        <input
+          type="text"
+          placeholder="Buscar descripción o socio..."
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          style={{ flex: 1, minWidth: 200 }}
+        />
         <select value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)} style={{ width: 220 }}>
           <option value="">Todas las categorías</option>
           {CATEGORIAS.map((c) => (
@@ -94,46 +121,74 @@ export default function Gastos() {
 
       {cargando ? (
         <div className="empty-state">Cargando...</div>
-      ) : visibles.length === 0 ? (
+      ) : gastos.length === 0 ? (
         <div className="empty-state">No hay gastos que coincidan con el filtro.</div>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Categoría</th>
-              <th>Tipo</th>
-              <th>Descripción</th>
-              <th>Pallet</th>
-              <th>Socio</th>
-              <th>Fecha</th>
-              <th className="num">Monto</th>
-              <th className="num">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibles.map((g) => (
-              <tr key={g.id}>
-                <td>{etiqueta(g.categoria)}</td>
-                <td>
-                  <span className={'badge ' + (g.afectaUtilidad ? 'vendido' : 'disponible')}>
-                    {g.afectaUtilidad ? 'Operativo' : 'No operativo'}
-                  </span>
-                </td>
-                <td className="muted">{g.descripcion || '—'}</td>
-                <td className="muted">{g.pallet?.numero ?? '—'}</td>
-                <td className="muted">{g.socio || '—'}</td>
-                <td className="muted">{g.fecha}</td>
-                <td className="num">{fmt(g.monto)}</td>
-                <td className="num">
-                  <div className="actions">
-                    <button className="action-btn" onClick={() => { setGastoEditando(g); setModalAbierto(true); }}>Editar</button>
-                    <button className="action-btn" onClick={() => eliminar(g)}>Eliminar</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Categoría</th>
+                  <th>Tipo</th>
+                  <th>Descripción</th>
+                  <th>Pallet</th>
+                  <th>Socio</th>
+                  <th>Fecha</th>
+                  <th className="num">Monto</th>
+                  <th className="num">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gastos.map((g) => (
+                  <tr key={g.id}>
+                    <td>{etiqueta(g.categoria)}</td>
+                    <td>
+                      <span className={'badge ' + (g.afectaUtilidad ? 'vendido' : 'disponible')}>
+                        {g.afectaUtilidad ? 'Operativo' : 'No operativo'}
+                      </span>
+                    </td>
+                    <td className="muted">{g.descripcion || '—'}</td>
+                    <td className="muted">{g.pallet?.numero ?? '—'}</td>
+                    <td className="muted">{g.socio || '—'}</td>
+                    <td className="muted">{g.fecha}</td>
+                    <td className="num">{fmt(g.monto)}</td>
+                    <td className="num">
+                      <div className="actions">
+                        <button className="action-btn" onClick={() => { setGastoEditando(g); setModalAbierto(true); }}>Editar</button>
+                        <button className="action-btn" onClick={() => eliminar(g)}>Eliminar</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="topbar" style={{ marginTop: 16, justifyContent: 'space-between' }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {totalRegistros} gasto(s) · página {pagina} de {totalPaginas}
+            </span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Por página</label>
+              <select
+                value={itemsPorPagina}
+                onChange={(e) => setItemsPorPagina(Number(e.target.value))}
+                style={{ width: 80 }}
+              >
+                {OPCIONES_POR_PAGINA.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              <button className="ghost" disabled={pagina <= 1} onClick={() => setPagina((p) => p - 1)}>
+                ← Anterior
+              </button>
+              <button className="ghost" disabled={pagina >= totalPaginas} onClick={() => setPagina((p) => p + 1)}>
+                Siguiente →
+              </button>
+            </div>
+          </div>
+        </>
       )}
 
       {modalAbierto && (

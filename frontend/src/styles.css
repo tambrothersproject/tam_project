@@ -131,3 +131,28 @@ tbody tr:hover { background: #191d27; }
 .accordion-chevron { transition: transform 0.15s ease; color: var(--text-secondary); font-size: 12px; }
 .accordion-chevron.open { transform: rotate(180deg); }
 .accordion-body { padding: 4px 18px 18px; }
+
+.subnav { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+.subnav-tab {
+  padding: 10px 14px; font-size: 13px; color: var(--text-secondary);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer;
+}
+.subnav-tab:hover { color: var(--text-primary); }
+.subnav-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+.nav-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 8px; }
+.nav-card {
+  display: block; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; color: var(--text-primary); transition: border-color 0.15s ease;
+}
+.nav-card:hover { border-color: var(--accent); }
+.nav-card-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.nav-card-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+
+.table-scroll { max-height: 480px; overflow-y: auto; border-radius: 12px; }
+.table-scroll table { border-radius: 0; }
+.table-scroll thead th { position: sticky; top: 0; z-index: 1; }
+
+.clickable-row { cursor: pointer; }
+.clickable-row:hover { background: #191d27; }
+

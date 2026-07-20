@@ -5,6 +5,7 @@ const metricsController = require('../controllers/metrics.controller');
 const auth = require('../middlewares/auth.middleware');
 
 router.get('/ventas-por-dia', auth, metricsController.ventasPorDia);
+router.get('/ventas-dia/:fecha', auth, metricsController.ventasDeUnDia);
 router.get('/pallets', auth, metricsController.resumenPallets);
 router.get('/pallets/:numero/productos', auth, metricsController.productosDePallet);
 router.get('/resumen', auth, metricsController.resumen);

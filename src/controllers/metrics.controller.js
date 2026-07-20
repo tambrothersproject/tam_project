@@ -1,11 +1,14 @@
 const { Op, fn, col, literal } = require('sequelize');
 const { Mercancia, Pallet, Gasto, Aportacion, ConteoCaja } = require('../models');
 
-// GET /api/metrics/ventas-por-dia?desde=&hasta=
+// GET /api/metrics/ventas-por-dia?desde=&hasta=&agrupacion=dia|semana|mes
 // Agrupa las ventas (Mercancias con estado VENDIDO) por fecha de venta.
+// "agrupacion" permite ver día a día, por semana (lunes de cada semana) o
+// por mes — pensado para que la gráfica siga siendo legible aunque pasen
+// meses/años y el historial diario crezca mucho.
 exports.ventasPorDia = async (req, res) => {
   try {
-    const { desde, hasta } = req.query;
+    const { desde, hasta, agrupacion = 'dia' } = req.query;
     const where = { estado: 'VENDIDO' };
     if (desde || hasta) {
       where.fechaVenta = {};
@@ -13,21 +16,51 @@ exports.ventasPorDia = async (req, res) => {
       if (hasta) where.fechaVenta[Op.lte] = hasta;
     }
 
+    const expresionFecha =
+      agrupacion === 'mes'
+        ? fn('to_char', col('fechaVenta'), 'YYYY-MM')
+        : agrupacion === 'semana'
+        ? fn('to_char', fn('date_trunc', 'week', col('fechaVenta')), 'YYYY-MM-DD')
+        : fn('to_char', col('fechaVenta'), 'YYYY-MM-DD');
+
     const filas = await Mercancia.findAll({
       where,
       attributes: [
-        ['fechaVenta', 'fecha'],
+        [expresionFecha, 'fecha'],
         [fn('COUNT', col('id')), 'articulosVendidos'],
         [fn('SUM', col('precioVenta')), 'totalVenta'],
       ],
-      group: ['fechaVenta'],
-      order: [['fechaVenta', 'ASC']],
+      group: [expresionFecha],
+      order: [[literal('fecha'), 'ASC']],
       raw: true,
     });
 
     res.json(filas);
   } catch (error) {
     res.status(500).json({ error: 'Error al calcular ventas por día', detalle: error.message });
+  }
+};
+
+// GET /api/metrics/ventas-dia/:fecha
+// Detalle de los artículos vendidos en un día exacto (YYYY-MM-DD). Es el
+// "drill-down" al hacer clic en una barra o fila de la vista de Ventas.
+// Solo tiene sentido cuando se navega en agrupación "dia"; una semana o
+// mes agrupa varias fechas y no hay un único día que consultar.
+exports.ventasDeUnDia = async (req, res) => {
+  try {
+    const { fecha } = req.params;
+
+    const articulos = await Mercancia.findAll({
+      where: { estado: 'VENDIDO', fechaVenta: fecha },
+      include: [{ model: Pallet, as: 'pallet', attributes: ['numero'] }],
+      order: [['precioVenta', 'DESC']],
+    });
+
+    const total = articulos.reduce((acc, a) => acc + parseFloat(a.precioVenta || 0), 0);
+
+    res.json({ fecha, cantidad: articulos.length, total, articulos });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener las ventas del día', detalle: error.message });
   }
 };
 

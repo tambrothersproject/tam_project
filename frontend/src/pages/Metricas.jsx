@@ -1,9 +1,36 @@
 import { useEffect, useState } from 'react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  ComposedChart,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from 'recharts';
 import api from '../api/client';
 
 function fmt(n) {
   return '$' + Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 });
 }
+
+// Paleta tomada de las variables CSS del tema (styles.css). Recharts dibuja
+// SVG directo y no siempre resuelve var(--...), así que se repiten los
+// valores hex aquí para que las gráficas combinen con el resto de la app.
+const COLOR_ACCENT = '#6d8dfa';
+const COLOR_SUCCESS = '#4fd1a0';
+const COLOR_DANGER = '#f2637a';
+const COLOR_MUTED = '#6b7080';
+const COLOR_BORDER = '#2a2f3a';
+const COLOR_TEXT = '#9a9fac';
+const PALETA_CATEGORIAS = ['#6d8dfa', '#4fd1a0', '#f2637a', '#f5c26b', '#a78bfa', '#6b7080'];
 
 const ETIQUETAS_CATEGORIA = {
   ASISTENCIA_MERCADO: 'Asistencia en el mercado',
@@ -12,6 +39,22 @@ const ETIQUETAS_CATEGORIA = {
   RETIRO_SOCIOS: 'Retiro de socio',
   OTRO: 'Otro',
 };
+
+// Tooltip oscuro consistente con el tema — el tooltip default de recharts
+// es blanco y desentona con el resto de la app.
+function TooltipOscuro({ active, payload, label, formatter }) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div style={{ background: '#1d212c', border: `1px solid ${COLOR_BORDER}`, borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+      {label && <div style={{ color: COLOR_TEXT, marginBottom: 4 }}>{label}</div>}
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color || '#e8e9ec' }}>
+          {p.name}: {formatter ? formatter(p.value) : p.value}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function Accordion({ title, defaultOpen = false, children }) {
   const [abierto, setAbierto] = useState(defaultOpen);
@@ -32,6 +75,7 @@ export default function Metricas() {
 
   const [resumen, setResumen] = useState(null);
   const [ventasPorDia, setVentasPorDia] = useState([]);
+  const [resumenMensual, setResumenMensual] = useState([]);
   const [gastosPorTipo, setGastosPorTipo] = useState(null);
   const [retirosSocios, setRetirosSocios] = useState(null);
   const [utilidadPallets, setUtilidadPallets] = useState(null);
@@ -47,18 +91,20 @@ export default function Metricas() {
       if (desde) params.desde = desde;
       if (hasta) params.hasta = hasta;
 
-      const [resResumen, resVentas, resRetiros, resGastosTipo, resUtilidadPallets] = await Promise.all([
+      const [resResumen, resVentas, resRetiros, resGastosTipo, resUtilidadPallets, resMensual] = await Promise.all([
         api.get('/metrics/resumen', { params }),
         api.get('/metrics/ventas-por-dia', { params }),
         api.get('/metrics/retiros-socios', { params }),
         api.get('/metrics/gastos-por-tipo', { params }),
         api.get('/metrics/utilidad-pallets', { params }),
+        api.get('/metrics/resumen-mensual', { params }),
       ]);
       setResumen(resResumen.data);
       setVentasPorDia(resVentas.data);
       setRetirosSocios(resRetiros.data);
       setGastosPorTipo(resGastosTipo.data);
       setUtilidadPallets(resUtilidadPallets.data);
+      setResumenMensual(resMensual.data);
     } catch (err) {
       setError(err.response?.data?.error || 'No se pudieron cargar las métricas');
     }
@@ -96,6 +142,23 @@ export default function Metricas() {
       .then(({ data }) => setProductosPallet(data));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estadoPallet]);
+
+  const datosUtilidadPallets = (utilidadPallets?.pallets || []).map((p) => ({
+    ...p,
+    nombre: `Pallet ${p.numero ?? '—'}`,
+  }));
+
+  const datosGastosPorTipo = (gastosPorTipo?.categorias || []).reduce((acc, c) => {
+    const existente = acc.find((a) => a.categoria === c.categoria);
+    const total = parseFloat(c.total);
+    if (existente) existente.total += total;
+    else acc.push({ categoria: c.categoria, nombre: ETIQUETAS_CATEGORIA[c.categoria] || c.categoria, total });
+    return acc;
+  }, []);
+
+  const datosRetiros = retirosSocios
+    ? Object.entries(retirosSocios.porSocio).map(([socio, monto]) => ({ socio, monto }))
+    : [];
 
   return (
     <div>
@@ -151,6 +214,27 @@ export default function Metricas() {
           </div>
         </div>
       )}
+
+      <Accordion title="Tendencia mensual (ventas, gastos, utilidad)" defaultOpen>
+        {resumenMensual.length === 0 ? (
+          <div className="empty-state">No hay datos suficientes para mostrar una tendencia.</div>
+        ) : (
+          <div style={{ width: '100%', height: 300 }}>
+            <ResponsiveContainer>
+              <ComposedChart data={resumenMensual} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke={COLOR_BORDER} vertical={false} />
+                <XAxis dataKey="mes" stroke={COLOR_TEXT} fontSize={12} />
+                <YAxis stroke={COLOR_TEXT} fontSize={12} width={70} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                <Tooltip content={<TooltipOscuro formatter={fmt} />} />
+                <Legend wrapperStyle={{ fontSize: 12, color: COLOR_TEXT }} />
+                <Bar dataKey="totalVentas" name="Ventas" fill={COLOR_ACCENT} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="totalGastosOperativos" name="Gastos operativos" fill={COLOR_DANGER} radius={[4, 4, 0, 0]} />
+                <Line type="monotone" dataKey="utilidadOperativa" name="Utilidad" stroke={COLOR_SUCCESS} strokeWidth={2} dot={{ r: 3 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Accordion>
 
       <Accordion title="Pallets" defaultOpen>
         <div style={{ display: 'grid', gridTemplateColumns: palletSeleccionado === null ? '1fr' : '1fr 1fr', gap: 20 }}>
@@ -237,7 +321,24 @@ export default function Metricas() {
               {' '}prorrateados entre {utilidadPallets.cantidadPalletsActivos} pallet(s) activo(s) →
               {' '}{fmt(utilidadPallets.prorrateoPorPallet)} c/u.
             </p>
-            <table>
+
+            <div style={{ width: '100%', height: Math.max(200, datosUtilidadPallets.length * 42) }}>
+              <ResponsiveContainer>
+                <BarChart data={datosUtilidadPallets} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 0 }}>
+                  <CartesianGrid stroke={COLOR_BORDER} horizontal={false} />
+                  <XAxis type="number" stroke={COLOR_TEXT} fontSize={12} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                  <YAxis type="category" dataKey="nombre" stroke={COLOR_TEXT} fontSize={12} width={80} />
+                  <Tooltip content={<TooltipOscuro formatter={fmt} />} />
+                  <Bar dataKey="utilidad" name="Utilidad neta" radius={[0, 4, 4, 0]}>
+                    {datosUtilidadPallets.map((p, i) => (
+                      <Cell key={i} fill={p.utilidad >= 0 ? COLOR_SUCCESS : COLOR_DANGER} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <table style={{ marginTop: 16 }}>
               <thead>
                 <tr>
                   <th>Pallet</th>
@@ -267,7 +368,7 @@ export default function Metricas() {
               <p className="muted" style={{ fontSize: 11, margin: '10px 0 0' }}>
                 Los pallets con costo de compra en $0.00 probablemente tengan su gasto de "Compra de
                 pallets" sin ligar todavía — edítalo en Gastos y selecciona el pallet correspondiente
-                para que esta tabla sea exacta.
+                para que esta gráfica y tabla sean exactas.
               </p>
             )}
           </>
@@ -277,62 +378,93 @@ export default function Metricas() {
       </Accordion>
 
       <Accordion title="Gastos por tipo">
-        {gastosPorTipo && (
-          <table style={{ maxWidth: 520 }}>
-            <thead>
-              <tr>
-                <th>Categoría</th>
-                <th>Tipo</th>
-                <th className="num">Cantidad</th>
-                <th className="num">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {gastosPorTipo.categorias.map((c, i) => (
-                <tr key={i}>
-                  <td>{ETIQUETAS_CATEGORIA[c.categoria] || c.categoria}</td>
-                  <td>
-                    <span className={'badge ' + (c.afectaUtilidad ? 'vendido' : 'disponible')}>
-                      {c.afectaUtilidad ? 'Operativo' : 'No operativo'}
-                    </span>
-                  </td>
-                  <td className="num">{c.cantidad}</td>
-                  <td className="num">{fmt(c.total)}</td>
+        {gastosPorTipo && datosGastosPorTipo.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20, alignItems: 'center' }}>
+            <div style={{ width: '100%', height: 220 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={datosGastosPorTipo} dataKey="total" nameKey="nombre" innerRadius={50} outerRadius={80} paddingAngle={2}>
+                    {datosGastosPorTipo.map((_, i) => (
+                      <Cell key={i} fill={PALETA_CATEGORIAS[i % PALETA_CATEGORIAS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<TooltipOscuro formatter={fmt} />} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <table style={{ maxWidth: 520 }}>
+              <thead>
+                <tr>
+                  <th>Categoría</th>
+                  <th>Tipo</th>
+                  <th className="num">Cantidad</th>
+                  <th className="num">Total</th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={3} style={{ fontWeight: 600 }}>Total operativo</td>
-                <td className="num" style={{ fontWeight: 600 }}>{fmt(gastosPorTipo.totalOperativo)}</td>
-              </tr>
-              <tr>
-                <td colSpan={3} style={{ fontWeight: 600 }}>Total no operativo</td>
-                <td className="num" style={{ fontWeight: 600 }}>{fmt(gastosPorTipo.totalNoOperativo)}</td>
-              </tr>
-            </tfoot>
-          </table>
+              </thead>
+              <tbody>
+                {gastosPorTipo.categorias.map((c, i) => (
+                  <tr key={i}>
+                    <td>
+                      <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 999, background: PALETA_CATEGORIAS[datosGastosPorTipo.findIndex((d) => d.categoria === c.categoria) % PALETA_CATEGORIAS.length], marginRight: 8 }} />
+                      {ETIQUETAS_CATEGORIA[c.categoria] || c.categoria}
+                    </td>
+                    <td>
+                      <span className={'badge ' + (c.afectaUtilidad ? 'vendido' : 'disponible')}>
+                        {c.afectaUtilidad ? 'Operativo' : 'No operativo'}
+                      </span>
+                    </td>
+                    <td className="num">{c.cantidad}</td>
+                    <td className="num">{fmt(c.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={3} style={{ fontWeight: 600 }}>Total operativo</td>
+                  <td className="num" style={{ fontWeight: 600 }}>{fmt(gastosPorTipo.totalOperativo)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={3} style={{ fontWeight: 600 }}>Total no operativo</td>
+                  <td className="num" style={{ fontWeight: 600 }}>{fmt(gastosPorTipo.totalNoOperativo)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         )}
       </Accordion>
 
       <Accordion title="Retiros por socio">
-        {retirosSocios && Object.keys(retirosSocios.porSocio).length > 0 ? (
-          <table style={{ maxWidth: 420 }}>
-            <thead>
-              <tr>
-                <th>Socio</th>
-                <th className="num">Total retirado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(retirosSocios.porSocio).map(([socio, monto]) => (
-                <tr key={socio}>
-                  <td className={socio === 'Sin asignar' ? 'muted' : ''}>{socio}</td>
-                  <td className="num">{fmt(monto)}</td>
+        {retirosSocios && datosRetiros.length > 0 ? (
+          <>
+            <div style={{ width: '100%', height: Math.max(160, datosRetiros.length * 50) }}>
+              <ResponsiveContainer>
+                <BarChart data={datosRetiros} layout="vertical" margin={{ top: 10, right: 30, left: 10, bottom: 0 }}>
+                  <CartesianGrid stroke={COLOR_BORDER} horizontal={false} />
+                  <XAxis type="number" stroke={COLOR_TEXT} fontSize={12} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                  <YAxis type="category" dataKey="socio" stroke={COLOR_TEXT} fontSize={12} width={90} />
+                  <Tooltip content={<TooltipOscuro formatter={fmt} />} />
+                  <Bar dataKey="monto" name="Total retirado" fill={COLOR_ACCENT} radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <table style={{ maxWidth: 420, marginTop: 16 }}>
+              <thead>
+                <tr>
+                  <th>Socio</th>
+                  <th className="num">Total retirado</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {Object.entries(retirosSocios.porSocio).map(([socio, monto]) => (
+                  <tr key={socio}>
+                    <td className={socio === 'Sin asignar' ? 'muted' : ''}>{socio}</td>
+                    <td className="num">{fmt(monto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         ) : (
           <div className="empty-state">No hay retiros registrados en el rango seleccionado.</div>
         )}
@@ -342,24 +474,37 @@ export default function Metricas() {
         {ventasPorDia.length === 0 ? (
           <div className="empty-state">No hay ventas en el rango seleccionado.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th className="num">Artículos vendidos</th>
-                <th className="num">Total vendido</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ventasPorDia.map((v) => (
-                <tr key={v.fecha}>
-                  <td>{v.fecha}</td>
-                  <td className="num">{v.articulosVendidos}</td>
-                  <td className="num">{fmt(v.totalVenta)}</td>
+          <>
+            <div style={{ width: '100%', height: 260 }}>
+              <ResponsiveContainer>
+                <ComposedChart data={ventasPorDia} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={COLOR_BORDER} vertical={false} />
+                  <XAxis dataKey="fecha" stroke={COLOR_TEXT} fontSize={11} />
+                  <YAxis stroke={COLOR_TEXT} fontSize={12} width={70} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip content={<TooltipOscuro formatter={fmt} />} />
+                  <Bar dataKey="totalVenta" name="Total vendido" fill={COLOR_ACCENT} radius={[3, 3, 0, 0]} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <table style={{ marginTop: 16 }}>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th className="num">Artículos vendidos</th>
+                  <th className="num">Total vendido</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {ventasPorDia.map((v) => (
+                  <tr key={v.fecha}>
+                    <td>{v.fecha}</td>
+                    <td className="num">{v.articulosVendidos}</td>
+                    <td className="num">{fmt(v.totalVenta)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </Accordion>
     </div>

@@ -11,6 +11,7 @@ router.get('/resumen', auth, metricsController.resumen);
 router.get('/gastos-por-tipo', auth, metricsController.gastosPorTipo);
 router.get('/balance-general', auth, metricsController.balanceGeneral);
 router.get('/retiros-socios', auth, metricsController.retirosPorSocio);
+router.get('/resumen-mensual', auth, metricsController.resumenMensual);
 router.get('/utilidad-pallets', auth, metricsController.utilidadPorPallet);
 
 module.exports = router;

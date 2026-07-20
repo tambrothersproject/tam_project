@@ -243,7 +243,71 @@ exports.retirosPorSocio = async (req, res) => {
   }
 };
 
-// GET /api/metrics/utilidad-pallets?desde=&hasta=
+// GET /api/metrics/resumen-mensual?desde=&hasta=
+// Ventas, gastos operativos y utilidad agrupados por mes — pensado para
+// graficar la tendencia del negocio a lo largo del tiempo, a diferencia de
+// /resumen que solo da un total acumulado del rango completo.
+exports.resumenMensual = async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+
+    const whereVentas = { estado: 'VENDIDO' };
+    const whereGastos = { afectaUtilidad: true };
+    if (desde || hasta) {
+      whereVentas.fechaVenta = {};
+      whereGastos.fecha = {};
+      if (desde) {
+        whereVentas.fechaVenta[Op.gte] = desde;
+        whereGastos.fecha[Op.gte] = desde;
+      }
+      if (hasta) {
+        whereVentas.fechaVenta[Op.lte] = hasta;
+        whereGastos.fecha[Op.lte] = hasta;
+      }
+    }
+
+    const [ventasPorMes, gastosPorMes] = await Promise.all([
+      Mercancia.findAll({
+        where: whereVentas,
+        attributes: [
+          [fn('to_char', col('fechaVenta'), 'YYYY-MM'), 'mes'],
+          [fn('SUM', col('precioVenta')), 'totalVentas'],
+        ],
+        group: [fn('to_char', col('fechaVenta'), 'YYYY-MM')],
+        raw: true,
+      }),
+      Gasto.findAll({
+        where: whereGastos,
+        attributes: [
+          [fn('to_char', col('fecha'), 'YYYY-MM'), 'mes'],
+          [fn('SUM', col('monto')), 'totalGastos'],
+        ],
+        group: [fn('to_char', col('fecha'), 'YYYY-MM')],
+        raw: true,
+      }),
+    ]);
+
+    // Se combinan ambos por mes; un mes puede tener ventas sin gastos
+    // registrados todavía (o viceversa), así que se arma con un mapa en
+    // vez de asumir que ambas consultas traen exactamente los mismos meses.
+    const mapa = {};
+    for (const v of ventasPorMes) {
+      mapa[v.mes] = { mes: v.mes, totalVentas: parseFloat(v.totalVentas || 0), totalGastosOperativos: 0 };
+    }
+    for (const g of gastosPorMes) {
+      if (!mapa[g.mes]) mapa[g.mes] = { mes: g.mes, totalVentas: 0, totalGastosOperativos: 0 };
+      mapa[g.mes].totalGastosOperativos = parseFloat(g.totalGastos || 0);
+    }
+
+    const filas = Object.values(mapa)
+      .map((f) => ({ ...f, utilidadOperativa: f.totalVentas - f.totalGastosOperativos }))
+      .sort((a, b) => a.mes.localeCompare(b.mes));
+
+    res.json(filas);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al calcular el resumen mensual', detalle: error.message });
+  }
+};
 // Utilidad real por pallet: ventas del pallet, menos su costo directo
 // (gastos con idPallet asignado, típicamente su compra), menos un
 // prorrateo de los gastos generales (gasolina, asistencia — gastos que
